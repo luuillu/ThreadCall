@@ -1,4 +1,3 @@
-#pragma once
 #include "threadCall.h"
 #include <vector>
 struct ThreadCallTest {
@@ -60,12 +59,5 @@ int main()
 {
 
 	ThreadCallTest::test();
-#define PN(n, ...) n
-	#pragma message(TDC_TO_STRING(TDC_DEFINE_ALL(PN)))
-
 	return 0;
 }
-
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif

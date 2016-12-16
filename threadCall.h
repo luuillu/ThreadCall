@@ -72,11 +72,6 @@
 #define TDC_CONSTRUCT_INIT_PARAM(i) ,param_##i(param_##i)
 #define TDC_CONSTRUCT_INIT_PARAM_N(n) TDC_REMOVE_FIRST_COMMA(TDC_FOR_EACH_N(TDC_CONSTRUCT_INIT_PARAM, n))
 
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wlocal-type-template-args"
-#endif
-
 struct ThreadCallManager{
 	template <typename T>
 	struct RemoveRefrence
