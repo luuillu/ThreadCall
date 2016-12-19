@@ -63,10 +63,10 @@
 #define TDC_PARAM_NAME_(i) ,TDC_PARAM_NAME(i)
 #define TDC_PARAM_NAME_N(n) TDC_REMOVE_FIRST_COMMA(TDC_FOR_EACH_N(TDC_PARAM_NAME_, n))
 
-#define TDC_FUNCTION_PARAM(i) , const TDC_TYPE_NAME(i)& TDC_PARAM_NAME(i)
+#define TDC_FUNCTION_PARAM(i) , typename AddRefrence<TDC_TYPE_NAME(i)>::TYPE TDC_PARAM_NAME(i)
 #define TDC_FUNCTION_PARAM_N(n)	TDC_REMOVE_FIRST_COMMA(TDC_FOR_EACH_N(TDC_FUNCTION_PARAM, n))
 
-#define TDC_CLASS_MEMBER_DEFINE(i) typename RemoveRefrence<TDC_TYPE_NAME(i)>::TYPE TDC_PARAM_NAME(i);
+#define TDC_CLASS_MEMBER_DEFINE(i) typename Trait<TDC_TYPE_NAME(i)>::MEMBER_TYPE TDC_PARAM_NAME(i);
 #define TDC_CLASS_MEMBER_DEFINE_N(n) TDC_FOR_EACH_N(TDC_CLASS_MEMBER_DEFINE, n)
 
 #define TDC_CONSTRUCT_INIT_PARAM(i) ,param_##i(param_##i)
@@ -74,20 +74,44 @@
 
 struct ThreadCallManager{
 	template <typename T>
-	struct RemoveRefrence
+	struct PostTrait
 	{
-		typedef T TYPE;
+		template <typename U>
+		struct RemoveRefrence
+		{
+			typedef U TYPE;
+		};
+
+		template <typename U>
+		struct RemoveRefrence<U&>
+		{
+			typedef U TYPE;
+		};
+		typedef typename RemoveRefrence<T>::TYPE MEMBER_TYPE;
 	};
 
 	template <typename T>
-	struct RemoveRefrence<T&>
+	struct SendTrait
 	{
-		typedef T TYPE;
+		typedef T MEMBER_TYPE;
+	};
+
+	template <typename T>
+	struct AddRefrence
+	{
+		typedef const T& TYPE;
+	};
+
+	template <typename T>
+	struct AddRefrence<T&>
+	{
+		typedef T& TYPE;
 	};
 
 	struct ThreadCall
 	{
-		virtual void execute()=0;
+		virtual void execute(void* pRet = NULL)=0;
+
 		virtual ~ThreadCall(){}
 	};
 
@@ -100,44 +124,62 @@ struct ThreadCallManager{
 	template<typename OWNER>
 	struct OnCreateT: OnCreate
 	{
-		typedef int64_t (OWNER::*PFUN)(ThreadCallManager::ThreadCall*, const char*, int32_t);
-		OnCreateT(OWNER* owner, PFUN pfnOncreate, const char* file, int32_t line):m_pOwner(owner), m_pfnOnCreate(pfnOncreate), m_szFile(file), m_nLine(line){}
+		typedef int64_t (OWNER::*PFUN)(ThreadCallManager::ThreadCall*, const char*, int32_t, void* pRet);
+		OnCreateT(OWNER* owner, PFUN pfnOncreate, const char* file, int32_t line, void* pRet):m_pOwner(owner), m_pfnOnCreate(pfnOncreate), m_szFile(file), m_nLine(line), m_pRet(pRet){}
 		virtual int64_t onCreateThreadCall(ThreadCallManager::ThreadCall* threadCall)
 		{
-			return (m_pOwner->*m_pfnOnCreate)(threadCall, m_szFile, m_nLine);
+			return (m_pOwner->*m_pfnOnCreate)(threadCall, m_szFile, m_nLine, m_pRet);
 		}
 		OWNER* const m_pOwner;
 		const PFUN m_pfnOnCreate;
         const char* m_szFile;
         const int32_t m_nLine;
+        void* m_pRet;
 	};
 
 	// 0 个参数
-	template<typename C, typename RET>
+	template<template<typename> class Trait, typename C, typename RET>
 	struct  Functor_0
 	{
 		typedef RET (C::*P_MF_TYPE)();
+		struct ThreadCall: ThreadCallManager::ThreadCall
+		{
+			 ThreadCall(C* pInstance, P_MF_TYPE pMf) : m_pInstance(pInstance), m_pMf(pMf) {}
 
-		C* m_pInstance;
-		P_MF_TYPE m_pMf;
-		OnCreate *m_pOnCreate;
+			 //此函数在其他线程执行
+			 void execute(void* pRet)
+			 {
+				 doExecute((RET*)pRet);
+			 }
+
+			 template<typename T>
+			 void doExecute(T* pRet)
+			 {
+				 if (NULL == pRet)
+				 {
+					 (m_pInstance->*m_pMf)();
+				 }
+				 else
+				 {
+					 *pRet = (m_pInstance->*m_pMf)();
+				 }
+			 }
+
+			 void doExecute(void* pRet)
+			 {
+				 (m_pInstance->*m_pMf)();
+			 }
+
+			 C* m_pInstance;
+			 P_MF_TYPE m_pMf;
+		};
+
 		template<typename OWNER>
-		Functor_0(C* pInstance, P_MF_TYPE pMf, const char* file, int32_t line, OWNER* owner, typename OnCreateT<OWNER>::PFUN pfnOncreate): m_pInstance(pInstance), m_pMf(pMf), m_pOnCreate(new OnCreateT<OWNER>(owner, pfnOncreate, file, line)){}
+		Functor_0(C* pInstance, P_MF_TYPE pMf, const char* file, int32_t line, void* pRet, OWNER* owner, typename OnCreateT<OWNER>::PFUN pfnOncreate): m_pInstance(pInstance), m_pMf(pMf), m_pOnCreate(new OnCreateT<OWNER>(owner, pfnOncreate, file, line, pRet)){}
 
 		int64_t operator()()
 		{
-			struct ThreadCall: ThreadCallManager::ThreadCall
-			{
-				C* m_pInstance;
-				P_MF_TYPE m_pMf;
 
-				 ThreadCall(C* pInstance, P_MF_TYPE pMf) : m_pInstance(pInstance), m_pMf(pMf) {}
-
-				 //此函数在其他线程执行
-				 void execute(){
-				   (m_pInstance->*m_pMf)();
-				 }
-			};
 			if (NULL != m_pOnCreate)
 			{
 				int64_t ret = m_pOnCreate->onCreateThreadCall(new ThreadCall(m_pInstance, m_pMf));
@@ -147,30 +189,48 @@ struct ThreadCallManager{
 			}
 			return -1;
 		}
+
+		C* m_pInstance;
+		P_MF_TYPE m_pMf;
+		OnCreate *m_pOnCreate;
 	};
 
 #define TDC_Functor_N(n, ...) \
-	template<typename C, typename RET, TDC_TEMPLATE_TYPE_NAME_N(n)> \
+	template<template<typename> class Trait, typename C, typename RET, TDC_TEMPLATE_TYPE_NAME_N(n)> \
 	struct  Functor_##n\
 	{\
 		typedef RET (C::*P_MF_TYPE)(TDC_TYPE_NAME_N(n));\
-		C* m_pInstance;\
-		P_MF_TYPE m_pMf;\
-		OnCreate *m_pOnCreate;\
+		struct ThreadCall: ThreadCallManager::ThreadCall\
+		{\
+			ThreadCall(C* pInstance, P_MF_TYPE pMf, TDC_FUNCTION_PARAM_N(n)) : m_pInstance(pInstance), m_pMf(pMf), TDC_CONSTRUCT_INIT_PARAM_N(n){}\
+			 void execute(void* pRet)\
+			 {\
+				doExecute((RET*)pRet);\
+			 }\
+			 template<typename T>\
+			 void doExecute(T* pRet)\
+			 {\
+				 if (NULL == pRet)\
+				 {\
+					 (m_pInstance->*m_pMf)(TDC_PARAM_NAME_N(n));\
+				 }\
+				 else\
+				 {\
+					 *pRet = (m_pInstance->*m_pMf)(TDC_PARAM_NAME_N(n));\
+				 }\
+			 }\
+			 void doExecute(void* pRet)\
+			 {\
+				 (m_pInstance->*m_pMf)(TDC_PARAM_NAME_N(n));\
+			 }\
+			 C* m_pInstance;\
+			 P_MF_TYPE m_pMf;\
+			 TDC_CLASS_MEMBER_DEFINE_N(n)\
+		};\
 		template<typename OWNER>\
-		Functor_##n(C* pInstance, P_MF_TYPE pMf, const char* file, int32_t line, OWNER* owner, typename OnCreateT<OWNER>::PFUN pfnOncreate): m_pInstance(pInstance), m_pMf(pMf), m_pOnCreate(new OnCreateT<OWNER>(owner, pfnOncreate, file, line)){}\
+		Functor_##n(C* pInstance, P_MF_TYPE pMf, const char* file, int32_t line, void* pRet, OWNER* owner, typename OnCreateT<OWNER>::PFUN pfnOncreate): m_pInstance(pInstance), m_pMf(pMf), m_pOnCreate(new OnCreateT<OWNER>(owner, pfnOncreate, file, line, pRet)){}\
 		int64_t operator()(TDC_FUNCTION_PARAM_N(n))\
 		{\
-			struct ThreadCall: ThreadCallManager::ThreadCall\
-			{\
-				C* m_pInstance;\
-				P_MF_TYPE m_pMf;\
-				TDC_CLASS_MEMBER_DEFINE_N(n)\
-				ThreadCall(C* pInstance, P_MF_TYPE pMf, TDC_FUNCTION_PARAM_N(n)) : m_pInstance(pInstance), m_pMf(pMf), TDC_CONSTRUCT_INIT_PARAM_N(n){}\
-				void execute(){\
-					(m_pInstance->*m_pMf)(TDC_PARAM_NAME_N(n));\
-				}\
-			};\
 			if (NULL != m_pOnCreate)\
 			{\
 				int64_t ret = m_pOnCreate->onCreateThreadCall(new ThreadCall(m_pInstance, m_pMf, TDC_PARAM_NAME_N(n)));\
@@ -180,25 +240,31 @@ struct ThreadCallManager{
 			}\
 			return -1;\
 		}\
+		C* m_pInstance;\
+		P_MF_TYPE m_pMf;\
+		OnCreate *m_pOnCreate;\
 	};\
 
 	TDC_DEFINE_ALL(TDC_Functor_N);
 };
 
-#define TDC_GET_FUNCTOR_0(FUNCTION_NAME, FN_ON_CREATE) \
+#define TDC_GET_FUNCTOR_0(FUNCTION_NAME, FN_ON_CREATE, Trait) \
 template<typename C, typename RET>\
-typename ThreadCallManager::Functor_0<C, RET> FUNCTION_NAME(C* pInstance, RET (C::*pMf)(), const char* file, int32_t line)\
+typename ThreadCallManager::Functor_0<Trait, C, RET> FUNCTION_NAME(C* pInstance, RET (C::*pMf)(), const char* file, int32_t line, void* pRet=NULL)\
 {\
-	return ThreadCallManager::Functor_0<C, RET>(pInstance, pMf, file, line, this, FN_ON_CREATE);\
+	return ThreadCallManager::Functor_0<Trait, C, RET>(pInstance, pMf, file, line, pRet, this, FN_ON_CREATE);\
 }
 
-#define TDC_GET_FUNCTOR_N(n, FUNCTION_NAME, FN_ON_CREATE) \
+#define TDC_GET_FUNCTOR_N(n, FUNCTION_NAME, FN_ON_CREATE, Trait) \
 template<typename C, typename RET, TDC_TEMPLATE_TYPE_NAME_N(n)>\
-typename ThreadCallManager::Functor_##n<C, RET, TDC_TYPE_NAME_N(n)> FUNCTION_NAME(C* pInstance, RET (C::*pMf)(TDC_TYPE_NAME_N(n)), const char* file, int32_t line)\
+typename ThreadCallManager::Functor_##n<Trait, C, RET, TDC_TYPE_NAME_N(n)> FUNCTION_NAME(C* pInstance, RET (C::*pMf)(TDC_TYPE_NAME_N(n)), const char* file, int32_t line, void* pRet=NULL)\
 {\
-	return ThreadCallManager::Functor_##n<C, RET, TDC_TYPE_NAME_N(n)>(pInstance, pMf, file, line, this, FN_ON_CREATE);\
+	return ThreadCallManager::Functor_##n<Trait, C, RET, TDC_TYPE_NAME_N(n)>(pInstance, pMf, file, line, pRet, this, FN_ON_CREATE);\
 }
 
-#define TDC_GET_FUNCTOR(FUNCTION_NAME, FN_ON_CREATE) \
-		TDC_GET_FUNCTOR_0(FUNCTION_NAME, FN_ON_CREATE) TDC_DEFINE_ALL(TDC_GET_FUNCTOR_N, FUNCTION_NAME, FN_ON_CREATE)
+#define TDC_GET_FUNCTOR(FUNCTION_NAME, FN_ON_CREATE, Trait) \
+		TDC_GET_FUNCTOR_0(FUNCTION_NAME, FN_ON_CREATE, Trait) TDC_DEFINE_ALL(TDC_GET_FUNCTOR_N, FUNCTION_NAME, FN_ON_CREATE, Trait)
+
+
+
 
