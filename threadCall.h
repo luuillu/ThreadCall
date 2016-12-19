@@ -1,8 +1,34 @@
 #pragma once
 #include <iostream>
 //macro prefix TDC_
+/***
+ * 这个类主要目的是方便成员函数跨线程调用，将成员函数调用包装成ThreadCall对象，发给消息线程，以供调用。支持Send和Post两种线程消息机制。
+ * 所提供的接口是一个宏函数TDC_GET_FUNCTOR(FUNCTION_NAME, FN_ON_CREATE, Trait)。
+ * 使用方法：在一个类（通常是消息线程类）中用宏 TDC_GET_FUNCTOR 声明一组成员函数。这组成员函数的签名是：
+ * Functor_n FUNCTION_NAME(C* pInstance, C::*pMf, const char* file, int32_t line, void* pRet=NULL)
+ * FUNCTION_NAME 为成员函数名， 可以随便起个名字，比如PostCall。
+ * pInstance 只想一个类的对象， pMf 指向这个对象中的某个成员函数。
+ * file，line 这两个参数用于调试。
+ * 这个函数的目的是把 (pInstance->*pMf)(param1, ..., paramn) 这样的调用包装成ThreadCall对象。然而这个函数并没有把调用pMf需要的参数传进来，
+ * 这项工作是由这个函数的返回值Functor_n 完成的。
+ *
+ * Functor_n 是一个C++ Functor 因此可以这样调用Functor_n(param1, ..., paramn) ,Functor_n的参数类型和个数是根据上一步操作中的参数pMf推导出来的。
+ * 所以Functor_n 的作用是接受参数，以供pMf 调用。由于Functor_n拥有调用 (pInstance->*pMf)(param1, ..., paramn) 的全部数据，所以它可以生成ThreadCall对象。
+ * ThreadCall有一个成员函数：void execute(void* pRet = NULL)=0; 调用这个execute函数就会执行(pInstance->*pMf)(param1, ..., paramn)。
+ * 参数pRet 用于接收返回值， 只对Send有效， Post时会忽略这个参数；传递null 表示不想接收返回值，如果不传NULL，但函数的返回类型为void，那么也会忽略这个参数。
+ * Functor_n 生成的ThreadCall对象需要传给外面处理，所用的方式就是这个宏的第二个参数FN_ON_CREATE，这个成员函数需要按如下的签名实现：
+ *
+ * int64_t (OWNER::*OnCreateThreadCall)(ThreadCallManager::ThreadCall* pThreadCall, const char* file , int32_t line , void* pRet)
+ * 这个签名有四个参数：1. pThreadCall 就是是Functor_n产生的对象的指针，Functor_n 只负责生成这个指针，并不释放，所以OnCreateThreadCall使用完pThreadCall 对象后需要释放内存。
+ * 	参数 2和3 用于调试， 参数4 的目的是接收返回值，只对Send有效， 调用pThreadCall->execute(pRet) 时直接传入即可。OnCreateThreadCall 需要返回一个int64_t 类型的msgId。
+ *
+ *这个宏的最后一个参数Trait,有两个可取值：ThreadCallManager::PostTrait 和ThreadCallManager::SendTrait 分别代表Post方式和Send方式，这两种方式的主要区别是:
+ *1. Post 是异步执行的，所以通过Functor_n 的到的参数在执行时，内存可能已经失效了，为了避免内存错误，对于引用参数类型，Functor_n 实际上会把参数的值复制一份。而Send是同步执行的，在传引用参数时直接按引用传递。
+ *2. Send方式可以获取执行后的返回值，Post不支持获取返回值。
+ *
+ * ***/
 
-//最大支持31 个参数
+//最大支持31 个参数的成员函数
 #define TDC_FOR_EACH_1(f) f(1)
 #define TDC_FOR_EACH_2(f) TDC_FOR_EACH_1(f) f(2)
 #define TDC_FOR_EACH_3(f) TDC_FOR_EACH_2(f) f(3)

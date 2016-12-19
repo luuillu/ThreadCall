@@ -1,4 +1,6 @@
+#include<assert.h>
 #define LOG_DEBUG(...) printf(__VA_ARGS__), printf("\n")
+#define sd_assert assert
 
 #include "threadCall.h"
 #include <vector>
@@ -53,41 +55,35 @@ struct ThreadCallTest {
 
 	static void test()
 	{
-		LOG_DEBUG("***ThreadCallTest test() Send Begin***");
-
 		ThreadCallTest test;
 		int ret = -1;
 		int64_t msgId = test.sendCall(&test, &ThreadCallTest::test_0, __FILE__, __LINE__, &ret)();
-		LOG_DEBUG("ThreadCallTest test() sendCall test_0, msgId=[%lld], ret = [%d]\n", msgId, ret);
+		sd_assert(msgId==1 && ret ==-1);
 
 		ret = -1;
 		msgId = test.sendCall(&test, &ThreadCallTest::test_2, __FILE__, __LINE__, &ret)(0, 6);
-		LOG_DEBUG(" ThreadCallTest test() sendCall test_2, msgId=[%lld], ret = [%d]\n", msgId, ret);
+		sd_assert(msgId==2 && ret ==10086);
 
 		int64_t llRet = -1;
 		std::string str = "Hello send call";
 		msgId = test.sendCall(&test, &ThreadCallTest::test_string, __FILE__, __LINE__, &llRet)(str, &str);
 		str.clear();
-		LOG_DEBUG("ThreadCallTest test() sendCall test_string, msgId=[%lld], llRet = [%lld]\n", msgId, llRet);
-
-		LOG_DEBUG("***ThreadCallTest test() Send End***");
+		sd_assert(msgId==3 && ret ==10086);
 
 		//PostCall
 		LOG_DEBUG("***ThreadCallTest test() Post Begin***");
 
 		msgId = test.postCall(&test, &ThreadCallTest::test_0, __FILE__, __LINE__)();
-		LOG_DEBUG("ThreadCallTest test() postCall test_0, msgId=[%lld], ret = [%d]\n", msgId, ret);
+		sd_assert(msgId==4);
 
 		ret = -1;
 		msgId = test.postCall(&test, &ThreadCallTest::test_2, __FILE__, __LINE__, &ret)(0, 6);
-		LOG_DEBUG(" ThreadCallTest test() postCall test_2, msgId=[%lld], ret = [%d]\n", msgId, ret);
+		sd_assert(msgId==5 && ret ==-1);
 
 		str = "Hello post call";
 		msgId = test.postCall(&test, &ThreadCallTest::test_string, __FILE__, __LINE__)(str, &str);
 		str.clear();
-		LOG_DEBUG("ThreadCallTest test() postCall test_string, msgId=[%lld], llRet = [%lld]\n", msgId, llRet);
-
-		LOG_DEBUG("***ThreadCallTest test() Post End***");
+		sd_assert(msgId==6);
 
 	}
 
